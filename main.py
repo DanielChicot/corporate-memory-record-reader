@@ -3,49 +3,45 @@ import argparse
 import base64
 import binascii
 import json
-import re
 
 import happybase as happybase
 import requests as requests
-
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
 
 
 def main():
     args = command_line_args()
-    record = hbase_record(args)
+    record = hbase_record(args.table, args.id)
     message = record['message']
     encryption = message['encryption']
-    decrypted_key = decrypted_datakey(args, encryption)
-    decrypted_db_object = decrypt(decrypted_key, encryption['initialisationVector'], message['dbObject'])
+    decrypted_key = decrypted_datakey(args.dks_url, args.certificate, args.key, args.dks_certificate, encryption)
+    decrypted_db_object = decrypted(decrypted_key, encryption['initialisationVector'], message['dbObject'])
     print(decrypted_db_object)
 
 
-def decrypted_datakey(args, encryption):
-    encrypting_key_id = encryption['keyEncryptionKeyId']
-    encrypted_key = encryption['encryptedEncryptionKey']
-    response = requests.post(f"{args.dks_url}/datakey/actions/decrypt", params={'keyId': encrypting_key_id},
-                             data=encrypted_key,
-                             cert=(args.certificate, args.key), verify=args.dks_certificate).json()
-    return response['plaintextDataKey']
-
-
-def hbase_record(args):
-    checksum = binascii.crc32(args.id.encode("ASCII"), 0).to_bytes(4, 'little')
-    # printable_checksum = checksum.hex().upper()
-    # escaped = re.sub("(..)", r"\\x\1", printable_checksum)
-    # printable_id = f"{escaped}{args.id}"
-    hbase_id = checksum + args.id.encode("ASCII")
+def hbase_record(table: str, id: str) -> dict:
+    checksum = binascii.crc32(id.encode("ASCII"), 0).to_bytes(4, 'little')
+    hbase_id: bytes = checksum + id.encode("ASCII")
     connection = happybase.Connection("hbase")
     connection.open()
-    table = connection.table(args.table)
-    row = table.row(hbase_id)
+    table = connection.table(table)
+    row = table.row(hbase_id.decode())
     record = json.loads(row[b'cf:record'].decode())
+    connection.close()
     return record
 
 
-def decrypt(key, iv, ciphertext):
+def decrypted_datakey(dks_url: str, certificate: str, key: str, dks_certificate: str, encryption) -> str:
+    encrypting_key_id = encryption['keyEncryptionKeyId']
+    encrypted_key = encryption['encryptedEncryptionKey']
+    response = requests.post(f"{dks_url}/datakey/actions/decrypt", params={'keyId': encrypting_key_id},
+                             data=encrypted_key,
+                             cert=(certificate, key), verify=dks_certificate).json()
+    return response['plaintextDataKey']
+
+
+def decrypted(key: str, iv: str, ciphertext: str) -> str:
     iv_int = int(binascii.hexlify(base64.b64decode(iv)), 16)
     ctr = Counter.new(AES.block_size * 8, initial_value=iv_int)
     aes = AES.new(base64.b64decode(key), AES.MODE_CTR, counter=ctr)
@@ -53,7 +49,7 @@ def decrypt(key, iv, ciphertext):
 
 
 def command_line_args():
-    parser = argparse.ArgumentParser(description='Read and decrypta record from the corporate memory store.')
+    parser = argparse.ArgumentParser(description='Read, decrypts a record from the corporate memory store (i.e. hbase).')
     parser.add_argument('dks_url', help='URL of the data key service.')
     parser.add_argument('key', help='This server\'s private key.')
     parser.add_argument('certificate', help='This server\'s certificate.')

@@ -14,15 +14,16 @@ def main():
     args = command_line_args()
     record = hbase_record(args.table, args.id)
     message = record['message']
-    encryption = message['encryption']
-    decrypted_key = decrypted_datakey(args.dks_url, args.certificate, args.key, args.dks_certificate, encryption)
-    decrypted_db_object = decrypted(decrypted_key, encryption['initialisationVector'], message['dbObject'])
+    encryption_metadata = message['encryption']
+    decrypted_key = decrypted_datakey(args.dks_url, args.certificate, args.key, args.dks_certificate,
+                                      encryption_metadata)
+    decrypted_db_object = decrypted(decrypted_key, encryption_metadata['initialisationVector'], message['dbObject'])
     print(decrypted_db_object)
 
 
-def hbase_record(table: str, id: str) -> dict:
-    checksum = binascii.crc32(id.encode("ASCII"), 0).to_bytes(4, 'little')
-    hbase_id: bytes = checksum + id.encode("ASCII")
+def hbase_record(table: str, uc_id: str) -> dict:
+    checksum = binascii.crc32(uc_id.encode("ASCII"), 0).to_bytes(4, 'little')
+    hbase_id: bytes = checksum + uc_id.encode("ASCII")
     connection = happybase.Connection("hbase")
     connection.open()
     table = connection.table(table)
@@ -42,8 +43,8 @@ def decrypted_datakey(dks_url: str, certificate: str, key: str, dks_certificate:
 
 
 def decrypted(key: str, iv: str, ciphertext: str) -> str:
-    iv_int = int(binascii.hexlify(base64.b64decode(iv)), 16)
-    ctr = Counter.new(AES.block_size * 8, initial_value=iv_int)
+    initial_value = int(binascii.hexlify(base64.b64decode(iv)), 16)
+    ctr = Counter.new(AES.block_size * 8, initial_value=initial_value)
     aes = AES.new(base64.b64decode(key), AES.MODE_CTR, counter=ctr)
     return aes.decrypt(base64.b64decode(ciphertext)).decode()
 

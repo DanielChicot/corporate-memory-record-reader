@@ -8,3 +8,5 @@ requests==2.25.1
 six==1.15.0
 thriftpy2==0.4.14
 urllib3==1.26.4
+
+boto3~=1.17.69
